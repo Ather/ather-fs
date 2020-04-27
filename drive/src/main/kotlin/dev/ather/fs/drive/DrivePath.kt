@@ -108,13 +108,10 @@ sealed class DrivePath : Path {
 
     override fun toUri(): URI = URI(
         "drive",
+        null,
         when (this) {
-            is FileId -> fileId
-            is Named -> rootId ?: "root"
-        },
-        when (this) {
-            is FileId -> null
-            is Named -> elements.joinToString(
+            is FileId -> "/$fileId"
+            is Named -> "/${rootId ?: "root"}" + elements.joinToString(
                 separator = "/",
                 prefix = "/"
             ) { it.replace("/", "\\/") }
@@ -191,20 +188,22 @@ sealed class DrivePath : Path {
         operator fun invoke(fileSystem: DriveFileSystem, uri: URI): DrivePath {
             val accountId = Regex("accountId=(.*)").find(uri.query.orEmpty())?.groupValues?.getOrNull(1)
             // We need a complex split and map to support escaped slashes in the path
-            val elements =
+            val path =
                 uri.path.takeIf { it.isNotBlank() }?.split(Regex("(?<!\\\\)/")).orEmpty().map { it.replace("\\/", "/") }
+            val rootId = path.getOrNull(1)?.takeIf { it.isNotBlank() }
+            val elements = path.subList(2, path.size)
             return when {
                 uri.scheme != "drive" -> throw ProviderMismatchException()
                 elements.isNotEmpty() -> Named(
                     fileSystem,
                     accountId,
-                    uri.authority?.takeIf { it.isNotBlank() },
-                    elements.subList(1, elements.size)
+                    rootId,
+                    elements
                 )
                 else -> FileId(
                     fileSystem,
                     accountId,
-                    uri.authority ?: "root"
+                    rootId ?: "root"
                 )
             }
         }
