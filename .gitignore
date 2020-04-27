@@ -1,0 +1,10 @@
+# JetBrains
+.idea
+
+# Gradle
+.gradle
+**/build/
+!src/**/build/
+
+# Ignored folders
+**/ignore/
