@@ -3,77 +3,50 @@ package dev.ather.fs.drive
 import java.net.URI
 import java.nio.file.*
 
-sealed class DrivePath : Path {
+data class DrivePath(
+    private val driveFileSystem: DriveFileSystem,
+    private val accountId: String?,
+    private val rootId: String? = "root",
+    private val elements: List<String>
+) : Path {
 
-    protected abstract val driveFileSystem: DriveFileSystem
-    protected abstract val accountId: String?
-
-    internal data class FileId(
-        override val driveFileSystem: DriveFileSystem,
-        override val accountId: String?,
-        val fileId: String
-    ) : DrivePath() {
-        override fun toString() = super.toString()
-    }
-
-    internal data class Named(
-        override val driveFileSystem: DriveFileSystem,
-        override val accountId: String?,
-        val rootId: String? = "root",
-        val elements: List<String>
-    ) : DrivePath() {
-
-        val normalizedElements: List<String> by lazy {
-            mutableListOf<String>().apply {
-                elements.forEach { element ->
-                    if (element == ".." && isNotEmpty()) {
-                        removeAt(lastIndex)
-                    } else if (element != ".") {
-                        add(element)
-                    }
+    private val normalizedElements: List<String> by lazy {
+        mutableListOf<String>().apply {
+            elements.forEach { element ->
+                if (element == ".." && isNotEmpty()) {
+                    removeAt(lastIndex)
+                } else if (element != ".") {
+                    add(element)
                 }
             }
         }
-
-        override fun toString() = super.toString()
     }
 
-    override fun isAbsolute(): Boolean = this is Named && !this.rootId.isNullOrBlank() || this is FileId
+    override fun isAbsolute(): Boolean = !this.rootId.isNullOrBlank()
 
-    override fun getFileName(): DrivePath? = when (this) {
-        is FileId -> null
-        is Named -> elements.lastOrNull()?.let { copy(elements = listOf(it)) }
+    override fun getFileName(): DrivePath? = elements.lastOrNull()?.let { copy(rootId = null, elements = listOf(it)) }
+
+    override fun getName(index: Int): DrivePath = if (index < 0 || index > elements.lastIndex) {
+        throw IllegalArgumentException()
+    } else {
+        copy(rootId = null, elements = listOf(elements[index]))
     }
 
-    override fun getName(index: Int): DrivePath = when (this) {
-        is FileId -> throw IllegalArgumentException()
-        is Named -> if (index < 0 || index > elements.lastIndex) {
-            throw IllegalArgumentException()
-        } else {
-            copy(rootId = null, elements = listOf(elements[index]))
-        }
-    }
-
-    override fun subpath(beginIndex: Int, endIndex: Int): DrivePath = when (this) {
-        is FileId -> throw IllegalArgumentException()
-        is Named -> copy(rootId = null, elements = (beginIndex..endIndex).map { elements[it] })
-    }
+    override fun subpath(beginIndex: Int, endIndex: Int): DrivePath =
+        copy(rootId = null, elements = (beginIndex..endIndex).map { elements[it] })
 
     private infix fun List<Any>.contentEquals(other: List<Any>): Boolean =
         this.withIndex().all { (index, any) -> other[index] == any }
 
-    override fun endsWith(other: Path): Boolean = when (this) {
-        is FileId -> this == other
-        is Named -> if (other is Named) {
-            val thisSize = elements.size
-            val otherSize = other.elements.size
-            (other.root == null
-                    && otherSize >= thisSize
-                    && elements.subList(thisSize - otherSize, thisSize) contentEquals other.elements)
-                    || (other.root != null && root != null && other.root == root && otherSize == thisSize && elements contentEquals other.elements)
-        } else {
-            false
-        }
+    override fun endsWith(other: Path): Boolean = if (other is DrivePath) {
+        val thisSize = elements.size
+        val otherSize = other.elements.size
+        (other.rootId == null
+                && otherSize >= thisSize
+                && elements.subList(thisSize - otherSize, thisSize) contentEquals other.elements)
+                || (other.rootId != null && rootId != null && other.rootId == rootId && otherSize == thisSize && elements contentEquals other.elements)
+    } else {
+        false
     }
 
     override fun register(
@@ -86,50 +59,42 @@ sealed class DrivePath : Path {
         throw ProviderMismatchException()
     }
 
-    override fun relativize(other: Path): DrivePath = when (this) {
-        is FileId -> throw IllegalArgumentException()
-        is Named -> when {
-            other !is DrivePath -> throw ProviderMismatchException()
-            other !is Named -> throw IllegalArgumentException()
-            this == other -> copy(rootId = null, elements = emptyList())
-            this.root == null && other.root == null
-                    && other.normalizedElements.size > normalizedElements.size
-                    && other.normalizedElements.subList(
-                0,
-                normalizedElements.size
-            ) contentEquals normalizedElements -> copy(
-                rootId = null,
-                elements = other.normalizedElements.subList(normalizedElements.size, other.normalizedElements.size)
-                    .toList()
-            )
-            else -> throw IllegalArgumentException()
-        }
+    override fun relativize(other: Path): DrivePath = when {
+        other !is DrivePath -> throw ProviderMismatchException()
+        this == other -> copy(rootId = null, elements = emptyList())
+        this.rootId == null && other.rootId == null
+                && other.normalizedElements.size > normalizedElements.size
+                && other.normalizedElements.subList(
+            0,
+            normalizedElements.size
+        ) contentEquals normalizedElements -> copy(
+            rootId = null,
+            elements = other.normalizedElements.subList(normalizedElements.size, other.normalizedElements.size)
+                .toList()
+        )
+        else -> throw IllegalArgumentException()
     }
+
+    private fun getPathString(): String? = elements.takeIf { it.isNotEmpty() }?.joinToString(
+        separator = "/",
+        prefix = "/"
+    ) { it.replace("/", "\\/") }
 
     override fun toUri(): URI = URI(
         "drive",
         null,
-        when (this) {
-            is FileId -> "/$fileId"
-            is Named -> "/${rootId ?: "root"}" + elements.joinToString(
-                separator = "/",
-                prefix = "/"
-            ) { it.replace("/", "\\/") }
-        },
+        "/${rootId ?: "root"}" + getPathString().orEmpty(),
         accountId?.let { "accountId=$it" },
         null
     )
 
     override fun toRealPath(vararg options: LinkOption): DrivePath = toAbsolutePath()
 
-    override fun normalize(): DrivePath = when (this) {
-        is FileId -> this
-        is Named -> copy(elements = normalizedElements)
-    }
+    override fun normalize(): DrivePath = copy(elements = normalizedElements)
 
-    override fun getParent(): DrivePath? = when (this) {
-        is FileId -> null
-        is Named -> copy(elements = (0 until elements.lastIndex).map { elements[it] })
+    override fun getParent(): DrivePath? = when {
+        !rootId.isNullOrBlank() && elements.isEmpty() -> null
+        else -> copy(elements = (0 until elements.lastIndex).map { elements[it] })
     }
 
     private fun buildUriWithoutCredential(drivePath: DrivePath) = drivePath.toUri().let {
@@ -140,45 +105,46 @@ sealed class DrivePath : Path {
         buildUriWithoutCredential(this).compareTo(buildUriWithoutCredential(it))
     }
 
-    override fun getNameCount(): Int = when (this) {
-        is FileId -> 0
-        is Named -> elements.size
-    }
+    override fun getNameCount(): Int = elements.size
 
-    override fun startsWith(other: Path): Boolean = when (this) {
-        is FileId -> other is FileId && fileId == other.fileId
-        is Named -> other is Named && rootId == other.rootId && elements.size >= other.elements.size && elements.subList(
+    override fun startsWith(other: Path): Boolean =
+        other is DrivePath && rootId == other.rootId && elements.size >= other.elements.size && elements.subList(
             0,
             other.elements.size
         ) contentEquals other.elements
-    }
 
     override fun getFileSystem(): DriveFileSystem = driveFileSystem
 
-    override fun getRoot(): DrivePath? = when (this) {
-        is FileId -> this
-        is Named -> rootId?.let { copy(elements = emptyList()) }
-    }
+    override fun getRoot(): DrivePath? = rootId?.let { copy(elements = emptyList()) }
 
     override fun resolve(other: Path): DrivePath = (other as? DrivePath)?.let {
-        when (this) {
-            is FileId -> when {
-                other is Named && !other.isAbsolute -> other.copy(rootId = fileId)
-                else -> other
+        when {
+            !other.isAbsolute -> when {
+                other.elements.isEmpty() -> this
+                else -> other.copy(rootId = rootId, elements = elements + other.elements)
             }
-            is Named -> when {
-                other is Named && !other.isAbsolute -> when {
-                    other.elements.isEmpty() -> this
-                    else -> other.copy(rootId = rootId, elements = elements + other.elements)
-                }
-                else -> other
-            }
+            else -> other
         }
     } ?: throw ProviderMismatchException()
 
-    override fun toAbsolutePath(): DrivePath = when (this) {
-        is FileId -> this
-        is Named -> this.takeIf { rootId != null } ?: copy(rootId = "root")
+    override fun toAbsolutePath(): DrivePath = this.takeIf { rootId != null } ?: copy(rootId = "root")
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is DrivePath) return false
+
+        if (accountId != other.accountId) return false
+        if (rootId != other.rootId) return false
+        if (elements != other.elements) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = accountId?.hashCode() ?: 0
+        result = 31 * result + (rootId?.hashCode() ?: 0)
+        result = 31 * result + elements.hashCode()
+        return result
     }
 
     override fun toString(): String = toUri().toString()
@@ -194,16 +160,11 @@ sealed class DrivePath : Path {
             val elements = path.subList(2, path.size)
             return when {
                 uri.scheme != "drive" -> throw ProviderMismatchException()
-                elements.isNotEmpty() -> Named(
+                else -> DrivePath(
                     fileSystem,
                     accountId,
                     rootId,
                     elements
-                )
-                else -> FileId(
-                    fileSystem,
-                    accountId,
-                    rootId ?: "root"
                 )
             }
         }
@@ -213,14 +174,11 @@ sealed class DrivePath : Path {
             accountId: String? = null,
             rootId: String? = null,
             vararg elements: String
-        ): DrivePath = when {
-            elements.isEmpty() && !rootId.isNullOrBlank() -> FileId(fileSystem, accountId, rootId)
-            else -> Named(
-                fileSystem,
-                accountId,
-                rootId,
-                elements.toList()
-            )
-        }
+        ): DrivePath = DrivePath(
+            fileSystem,
+            accountId,
+            rootId,
+            elements.toList()
+        )
     }
 }
