@@ -3,6 +3,27 @@ package dev.ather.fs.drive
 import java.net.URI
 import java.nio.file.*
 
+/**
+ * Google Drive implementation of [Path]
+ *
+ * Represent Google Drive files as
+ * ```
+ * drive:/[rootId][/path][?accountId]
+ * ```
+ *
+ * Where
+ *
+ *      | Name      | Description                                                                            |
+ *      |-----------|----------------------------------------------------------------------------------------|
+ *      | rootId    | The root of the path. This can be a folder ID, file ID, or "root".                     |
+ *      |           | If a file ID, the path is absolute and cannot have additional siblings resolved to it. |
+ *      |           | If null, the path is not treated as absolute.                                          |
+ *      | path      | The "/" delimited list of folder/file names relative to the root fileId                |                                                                                                                              |
+ *      | accountId | The accountId to use while looking up credentials to access a given file.              |
+ *      |           | null can be used if there is only a single account which needs to be supported.        |
+ *
+ * @see Path
+ */
 data class DrivePath(
     private val driveFileSystem: DriveFileSystem,
     private val accountId: String?,
