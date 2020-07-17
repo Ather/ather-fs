@@ -8,25 +8,25 @@ import java.nio.file.*
  *
  * Represent Google Drive files as
  * ```
- * drive:/[rootId][/path][?accountId]
+ * drive:/[rootId][/path][?credentialId]
  * ```
  *
  * Where
  *
- *      | Name      | Description                                                                            |
- *      |-----------|----------------------------------------------------------------------------------------|
- *      | rootId    | The root of the path. This can be a folder ID, file ID, or "root".                     |
- *      |           | If a file ID, the path is absolute and cannot have additional siblings resolved to it. |
- *      |           | If null, the path is not treated as absolute.                                          |
- *      | path      | The "/" delimited list of folder/file names relative to the root fileId                |                                                                                                                              |
- *      | accountId | The accountId to use while looking up credentials to access a given file.              |
- *      |           | null can be used if there is only a single account which needs to be supported.        |
+ *      | Name         | Description                                                                            |
+ *      |--------------|----------------------------------------------------------------------------------------|
+ *      | rootId       | The root of the path. This can be a folder ID, file ID, or "root".                     |
+ *      |              | If a file ID, the path is absolute and cannot have additional siblings resolved to it. |
+ *      |              | If null, the path is not treated as absolute.                                          |
+ *      | path         | The "/" delimited list of folder/file names relative to the root fileId                |                                                                                                                              |
+ *      | credentialId | The credentialId to use while looking up credentials to access a given file.           |
+ *      |              | null can be used if there is only a single credential which needs to be supported.     |
  *
  * @see Path
  */
 data class DrivePath(
     private val driveFileSystem: DriveFileSystem,
-    private val accountId: String?,
+    private val credentialId: String?,
     private val rootId: String? = "root",
     private val elements: List<String>
 ) : Path {
@@ -105,7 +105,7 @@ data class DrivePath(
         "drive",
         null,
         "/${rootId ?: "root"}" + getPathString().orEmpty(),
-        accountId?.let { "accountId=$it" },
+        credentialId?.let { "credentialId=$it" },
         null
     )
 
@@ -154,7 +154,7 @@ data class DrivePath(
         if (this === other) return true
         if (other !is DrivePath) return false
 
-        if (accountId != other.accountId) return false
+        if (credentialId != other.credentialId) return false
         if (rootId != other.rootId) return false
         if (elements != other.elements) return false
 
@@ -162,7 +162,7 @@ data class DrivePath(
     }
 
     override fun hashCode(): Int {
-        var result = accountId?.hashCode() ?: 0
+        var result = credentialId?.hashCode() ?: 0
         result = 31 * result + (rootId?.hashCode() ?: 0)
         result = 31 * result + elements.hashCode()
         return result
@@ -173,7 +173,7 @@ data class DrivePath(
     companion object {
 
         operator fun invoke(fileSystem: DriveFileSystem, uri: URI): DrivePath {
-            val accountId = Regex("accountId=(.*)").find(uri.query.orEmpty())?.groupValues?.getOrNull(1)
+            val credentialId = Regex("credentialId=(.*)").find(uri.query.orEmpty())?.groupValues?.getOrNull(1)
             // We need a complex split and map to support escaped slashes in the path
             val path =
                 uri.path.takeIf { it.isNotBlank() }?.split(Regex("(?<!\\\\)/")).orEmpty().map { it.replace("\\/", "/") }
@@ -183,7 +183,7 @@ data class DrivePath(
                 uri.scheme != "drive" -> throw ProviderMismatchException()
                 else -> DrivePath(
                     fileSystem,
-                    accountId,
+                    credentialId,
                     rootId,
                     elements
                 )
@@ -192,12 +192,12 @@ data class DrivePath(
 
         operator fun invoke(
             fileSystem: DriveFileSystem,
-            accountId: String? = null,
+            credentialId: String? = null,
             rootId: String? = null,
             vararg elements: String
         ): DrivePath = DrivePath(
             fileSystem,
-            accountId,
+            credentialId,
             rootId,
             elements.toList()
         )
