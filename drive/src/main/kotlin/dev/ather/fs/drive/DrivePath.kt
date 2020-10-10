@@ -8,25 +8,25 @@ import java.nio.file.*
  *
  * Represent Google Drive files as
  * ```
- * drive:/[rootId][/path][?credentialId]
+ * drive:/[rootId][/path][?principalName]
  * ```
  *
  * Where
  *
- *      | Name         | Description                                                                            |
- *      |--------------|----------------------------------------------------------------------------------------|
- *      | rootId       | The root of the path. This can be a folder ID, file ID, or "root".                     |
- *      |              | If a file ID, the path is absolute and cannot have additional siblings resolved to it. |
- *      |              | If null, the path is not treated as absolute.                                          |
- *      | path         | The "/" delimited list of folder/file names relative to the root fileId                |                                                                                                                              |
- *      | credentialId | The credentialId to use while looking up credentials to access a given file.           |
- *      |              | null can be used if there is only a single credential which needs to be supported.     |
+ *      | Name          | Description                                                                            |
+ *      |---------------|----------------------------------------------------------------------------------------|
+ *      | rootId        | The root of the path. This can be a folder ID, file ID, or "root".                     |
+ *      |               | If a file ID, the path is absolute and cannot have additional siblings resolved to it. |
+ *      |               | If null, the path is not treated as absolute.                                          |
+ *      | path          | The "/" delimited list of folder/file names relative to the root fileId                |                                                                                                                              |
+ *      | principalName | The principalName to use while looking up principals to access a given file.           |
+ *      |               | null can be used if there is only a single principal which needs to be supported.      |
  *
  * @see Path
  */
 data class DrivePath(
     private val driveFileSystem: DriveFileSystem,
-    private val credentialId: String?,
+    private val principalName: String?,
     private val rootId: String? = "root",
     private val elements: List<String>
 ) : Path {
@@ -105,7 +105,7 @@ data class DrivePath(
         "drive",
         null,
         "/${rootId ?: "root"}" + getPathString().orEmpty(),
-        credentialId?.let { "credentialId=$it" },
+        principalName?.let { "principalName=$it" },
         null
     )
 
@@ -118,12 +118,12 @@ data class DrivePath(
         else -> copy(elements = (0 until elements.lastIndex).map { elements[it] })
     }
 
-    private fun buildUriWithoutCredential(drivePath: DrivePath) = drivePath.toUri().let {
+    private fun buildUriWithoutPrincipal(drivePath: DrivePath) = drivePath.toUri().let {
         URI(it.scheme, it.authority, it.path, null, null)
     }
 
     override fun compareTo(other: Path): Int = (other as DrivePath).let {
-        buildUriWithoutCredential(this).compareTo(buildUriWithoutCredential(it))
+        buildUriWithoutPrincipal(this).compareTo(buildUriWithoutPrincipal(it))
     }
 
     override fun getNameCount(): Int = elements.size
@@ -154,7 +154,7 @@ data class DrivePath(
         if (this === other) return true
         if (other !is DrivePath) return false
 
-        if (credentialId != other.credentialId) return false
+        if (principalName != other.principalName) return false
         if (rootId != other.rootId) return false
         if (elements != other.elements) return false
 
@@ -162,7 +162,7 @@ data class DrivePath(
     }
 
     override fun hashCode(): Int {
-        var result = credentialId?.hashCode() ?: 0
+        var result = principalName?.hashCode() ?: 0
         result = 31 * result + (rootId?.hashCode() ?: 0)
         result = 31 * result + elements.hashCode()
         return result
@@ -172,8 +172,10 @@ data class DrivePath(
 
     companion object {
 
+        @JvmStatic
+        @JvmName("build")
         operator fun invoke(fileSystem: DriveFileSystem, uri: URI): DrivePath {
-            val credentialId = Regex("credentialId=(.*)").find(uri.query.orEmpty())?.groupValues?.getOrNull(1)
+            val principalName = Regex("principalName=(.*)").find(uri.query.orEmpty())?.groupValues?.getOrNull(1)
             // We need a complex split and map to support escaped slashes in the path
             val path =
                 uri.path.takeIf { it.isNotBlank() }?.split(Regex("(?<!\\\\)/")).orEmpty().map { it.replace("\\/", "/") }
@@ -183,21 +185,23 @@ data class DrivePath(
                 uri.scheme != "drive" -> throw ProviderMismatchException()
                 else -> DrivePath(
                     fileSystem,
-                    credentialId,
+                    principalName,
                     rootId,
                     elements
                 )
             }
         }
 
+        @JvmStatic
+        @JvmName("build")
         operator fun invoke(
             fileSystem: DriveFileSystem,
-            credentialId: String? = null,
+            principalName: String? = null,
             rootId: String? = null,
             vararg elements: String
         ): DrivePath = DrivePath(
             fileSystem,
-            credentialId,
+            principalName,
             rootId,
             elements.toList()
         )
